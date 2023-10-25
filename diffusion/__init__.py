@@ -1,3 +1,3 @@
-from . import diffusion_base, ddpm, ddim, karras
+from . import common, diffusion_base, ddpm, ddim, karras
 
-__all__ = ["diffusion_base", "ddpm", "ddim", "karras"]
+__all__ = ["common", "diffusion_base", "ddpm", "ddim", "karras"]
