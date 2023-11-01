@@ -6,8 +6,8 @@ from torch import Tensor, Size
 from jjuke.utils import interp1d # TODO: check if ti works not using "from scipy.interpolate import interp1d"
 from einops import rearrange
 
-from jjuke_diffusion.diffusion.common import get_betas
-from jjuke_diffusion.diffusion.diffusion_base import DiffusionBase
+from .common import get_betas
+from .diffusion_base import DiffusionBase
 
 
 class KarrasSampler(DiffusionBase):

@@ -6,10 +6,10 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, Size
 from einops import rearrange, reduce
-
 from jjuke.utils import default
-from jjuke_diffusion.diffusion.common import normal_kl, discretized_gaussian_log_likelihood
-from jjuke_diffusion.diffusion.diffusion_base import DiffusionBase
+
+from .common import normal_kl, discretized_gaussian_log_likelihood
+from .diffusion_base import DiffusionBase
 
 
 class DDPMTrainer(DiffusionBase):

@@ -9,10 +9,9 @@ import torch.nn.functional as F
 from torch import nn
 from einops import rearrange, repeat, pack, unpack
 from einops.layers.torch import Rearrange
+from jjuke.utils import default, conv_nd, resize_feature_to
 
-from jjuke_diffusion.unet.base_modules import weight_standardized_conv_nd, \
-    RMSNorm, LayerNorm, l2norm
-from jjuke_diffusion.common import default, conv_nd, resize_feature_to
+from .base_modules import weight_standardized_conv_nd, RMSNorm, LayerNorm, l2norm
 
 
 def Downsample(dim, dim_out = None, unet_dim = None):

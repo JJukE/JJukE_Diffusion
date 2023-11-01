@@ -9,12 +9,12 @@ import torch.nn.functional as F
 from torch import nn
 from einops import rearrange, pack, unpack
 from einops.layers.torch import Rearrange
+from jjuke.utils import default, cast_tuple, conv_nd
 
-from jjuke_diffusion.common  import default, cast_tuple, conv_nd
-from jjuke_diffusion.unet.base_modules import RandomOrLearnedSinusoidalPosEmb, SinusoidalPosEmb, \
+from .base_modules import RandomOrLearnedSinusoidalPosEmb, SinusoidalPosEmb, \
     Residual, PreNorm
-from jjuke_diffusion.unet.unet_modules import attention_nd, linear_attention_nd, ResnetBlock, CrossEmbedLayer, \
-    Downsample, Upsample, UpsampleCombiner
+from .unet_modules import attention_nd, linear_attention_nd, ResnetBlock, CrossEmbedLayer, \
+    Downsample, Upsample #, UpsampleCombiner
 
 
 class RearrangeToSequence(nn.Module):

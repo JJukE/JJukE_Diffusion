@@ -10,9 +10,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from einops import rearrange, repeat
+from jjuke.utils import default, zero_module, conv_nd, avg_pool_nd
 
-from jjuke_diffusion.common import default, zero_module, conv_nd, avg_pool_nd
-from jjuke_diffusion.unet_ldm.attention import SpatialTransformer, AttentionBlock, checkpoint
+from .attention import SpatialTransformer, AttentionBlock, checkpoint
 
 
 class TimestepBlock(nn.Module):

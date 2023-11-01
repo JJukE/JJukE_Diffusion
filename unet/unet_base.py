@@ -7,12 +7,11 @@ from functools import partial
 import torch
 from torch import nn
 from einops import rearrange
+from jjuke.utils import default, cast_tuple, conv_nd
 
-from jjuke.utils import default, cast_tuple
-from jjuke_diffusion.common import conv_nd
-from jjuke_diffusion.unet.base_modules import RandomOrLearnedSinusoidalPosEmb, SinusoidalPosEmb, \
+from .base_modules import RandomOrLearnedSinusoidalPosEmb, SinusoidalPosEmb, \
     Residual, PreNorm
-from jjuke_diffusion.unet.unet_modules import attention_nd, linear_attention_nd, ResnetBlock, \
+from .unet_modules import attention_nd, linear_attention_nd, ResnetBlock, \
     Downsample, Upsample
 
 

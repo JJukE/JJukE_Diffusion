@@ -2,9 +2,8 @@ from functools import partial
 
 import torch
 from torch import nn
+from jjuke.utils import conv_nd, zero_module
 
-from ..common import conv_nd
-from .attention import zero_module
 from .unet_modules import ResBlock, AttentionBlock, SpatialTransformer, \
     TimestepEmbedSequential, Downsample, Upsample, timestep_embedding
 

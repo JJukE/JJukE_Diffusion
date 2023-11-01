@@ -3,10 +3,10 @@ from typing import Callable, Union, Sequence
 import numpy as np
 import torch
 from torch import Tensor, Size
-
 from jjuke.utils import default
-from jjuke_diffusion.diffusion.common import get_betas
-from jjuke_diffusion.diffusion.diffusion_base import DiffusionBase
+
+from .common import get_betas
+from .diffusion_base import DiffusionBase
 
 class DDIMSampler(DiffusionBase):
     def __init__(

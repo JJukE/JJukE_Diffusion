@@ -6,8 +6,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 from einops import rearrange, repeat
-
-from ..common import default, max_neg_value, zero_module, conv_nd
+from jjuke.utils import default, max_neg_value, zero_module, conv_nd
 
 
 def count_flops_attn(model, _x, y):
