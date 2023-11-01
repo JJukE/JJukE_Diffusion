@@ -8,10 +8,11 @@ import torch
 from torch import nn
 from einops import rearrange
 
-from jjuke.modules.common import default, cast_tuple
-from jjuke.modules.unet.base_modules import conv_nd, RandomOrLearnedSinusoidalPosEmb, SinusoidalPosEmb, \
+from jjuke.utils import default, cast_tuple
+from jjuke_diffusion.common import conv_nd
+from jjuke_diffusion.unet.base_modules import RandomOrLearnedSinusoidalPosEmb, SinusoidalPosEmb, \
     Residual, PreNorm
-from jjuke.modules.unet.unet_modules import attention_nd, linear_attention_nd, ResnetBlock, \
+from jjuke_diffusion.unet.unet_modules import attention_nd, linear_attention_nd, ResnetBlock, \
     Downsample, Upsample
 
 

@@ -1,11 +1,6 @@
 import numpy as np
 import torch
 from torch import Tensor
-# from einops import rearrange
-
-# def unsqueeze_as(x, y) -> Tensor:
-#     pattern = "... -> ..." + " ".join(["()"] * y.dim() - x.dim())
-#     return rearrange(x, pattern)
 
 def _warmup_beta(linear_start, linear_end, n_timestep, warmup_frac):
     betas = linear_end * np.ones(n_timestep, dtype=np.float64)

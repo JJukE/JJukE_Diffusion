@@ -4,6 +4,7 @@ Diffusion bases for other various models
 
 ```bash
 .
+|-- README.md
 |-- __init__.py
 |-- common.py
 |-- diffusion
@@ -12,21 +13,26 @@ Diffusion bases for other various models
 |   |-- ddim.py
 |   |-- ddpm.py
 |   |-- diffusion_base.py
+|   |-- gaussian_diffusion.py
 |   |-- karras.py
 |   `-- ldm.py
-`-- unet
-    |-- __init__.py
-    |-- base_modules.py
-    |-- ldm_unet.py
-    |-- transformer.py
-    |-- unet_base.py
-    |-- unet_cond.py
+|-- unet
+|   |-- __init__.py
+|   |-- base_modules.py
+|   |-- ldm_unet.py
+|   |-- transformer.py
+|   |-- unet_base.py
+|   |-- unet_cond.py
+|   `-- unet_modules.py
+`-- unet_ldm
+    |-- attention.py
+    |-- unet.py
     `-- unet_modules.py
 ```
 
 # To-do List
 
 - [ ] Test 1D U-Net
-- [ ] Implement Conditional U-Net (need to study classifier free guidance)
-- [ ] Trouble shooting of LDM U-Net (OOM)
+- [ ] Implement Conditional U-Net
+- [ ] Test LDM U-Net
 - [ ] Implement 3D U-Net

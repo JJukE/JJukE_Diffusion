@@ -10,9 +10,8 @@ from torch import nn
 from einops import rearrange, reduce
 
 
-def conv_nd(unet_dim, *args, **kwargs):
-    """ Specify Conv for general U-Net """
-    return {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}[unet_dim](*args, **kwargs)
+def l2norm(t, dim=-1):
+    return F.normalize(t, dim=dim)
 
 
 class WeightStandardizedConv1d(nn.Conv1d):

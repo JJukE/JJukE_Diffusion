@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from torch import Tensor, Size
 
-from jjuke.modules.common import default
-from jjuke.modules.diffusion.common import get_betas
-from jjuke.modules.diffusion.diffusion_base import DiffusionBase
+from jjuke.utils import default
+from jjuke_diffusion.diffusion.common import get_betas
+from jjuke_diffusion.diffusion.diffusion_base import DiffusionBase
 
 class DDIMSampler(DiffusionBase):
     def __init__(

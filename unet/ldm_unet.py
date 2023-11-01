@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 from einops import rearrange
 
-from jjuke.modules.unet.transformer import SpatialTransformer
+from jjuke_diffusion.unet.transformer import SpatialTransformer
 
 
 class UNetModel(nn.Module):
