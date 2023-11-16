@@ -32,6 +32,6 @@ Diffusion bases for other various models
 # To-do List
 
 - [ ] Test 1D U-Net
-- [ ] Implement Conditional U-Net
-- [ ] Test LDM U-Net
-- [ ] Implement 3D U-Net
+- [x] Implement Conditional U-Net
+- [x] Test LDM U-Net
+- [ ] Enjoy it!
