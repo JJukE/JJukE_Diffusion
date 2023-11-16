@@ -73,7 +73,7 @@ class DDPMTrainer(DiffusionBase):
     
     def forward(self, denoise_fn: Callable[[Tensor, Tensor], Tensor],
                 x_start: Tensor, t: Tensor = None, noise: Tensor = None, return_info=False):
-        batch_size = x_start.size(0)
+        batch_size = x_start.shape[0]
         t = default(t, lambda: torch.randint(0, self.num_timesteps, (batch_size, ), dtype=torch.long, device=self.device))
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start, t, noise)
@@ -90,7 +90,7 @@ class DDPMTrainer(DiffusionBase):
             # \mathcal{L}_\text{vlb}
             model_out = denoise_fn(x_t, t)
             if self.model_var_type in ["learned", "learned_range"]:
-                assert model_out.size(1) == 2 * x_t.size(1), "Output channel must be double of input channel for {}".format(self.model_var_type)
+                assert model_out.shape[1] == 2 * x_t.shape[1], "Output channel must be double of input channel for {}".format(self.model_var_type)
                 model_out, tmp = torch.chunk(model_out, chunks=2, dim=1)
                 frozen_out = torch.cat([model_out.detach(), tmp], dim=1)
                 info.update(self.get_vlb(lambda *_: frozen_out, x_start, x_t, t)) # return the values of the variables regardless of its input

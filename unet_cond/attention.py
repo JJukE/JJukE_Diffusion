@@ -9,73 +9,53 @@ from einops import rearrange, repeat
 from jjuke.utils import default, max_neg_value, zero_module, conv_nd
 
 
-def count_flops_attn(model, _x, y):
-    """
-    A counter for the `thop` package to count the operations in an
-    attention operation.
-    Meant to be used like:
-        macs, params = thop.profile(
-            model,
-            inputs=(inputs, timestamps),
-            custom_ops={QKVAttention: QKVAttention.count_flops},
-        )
-    """
-    b, c, *spatial = y[0].shape
-    num_spatial = int(np.prod(spatial))
-    # We perform two matmuls with the same number of ops.
-    # The first computes the weight matrix, the second computes
-    # the combination of the value vectors.
-    matmul_ops = 2 * b * (num_spatial**2) * c
-    model.total_ops += torch.DoubleTensor([matmul_ops])
-
-
-class CheckpointFunction(torch.autograd.Funciton):
-    @staticmethod
-    def forward(ctx, run_function, length, *args):
-        ctx.run_function = run_function
-        ctx.input_tensors = list(args[:length])
-        ctx.input_params = list(args[length:])
+# class CheckpointFunction(torch.autograd.Function):
+#     @staticmethod
+#     def forward(ctx, run_function, length, *args):
+#         ctx.run_function = run_function
+#         ctx.input_tensors = list(args[:length])
+#         ctx.input_params = list(args[length:])
         
-        with torch.no_grad():
-            output_tensors = ctx.run_function(*ctx.input_tensors)
-        return output_tensors
+#         with torch.no_grad():
+#             output_tensors = ctx.run_function(*ctx.input_tensors)
+#         return output_tensors
     
-    @staticmethod
-    def backward(ctx, *output_grads):
-        ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
-        with torch.enable_grad():
-            # Fixes a bug where the first op in run_function modifies the Tensor storage
-            # in place, which is not allowed for detach()'d Tensors.
-            shallow_copies = [x.view_as(x) for x in ctx.input_tensors]
-            output_tensors = ctx.run_function(*shallow_copies)
-        input_grads = torch.autograd.grad(
-            output_tensors,
-            ctx.input_tensors + ctx.input_params,
-            output_grads,
-            allow_unused=True
-        )
-        del ctx.input_tensors
-        del ctx.input_params
-        del output_tensors
-        return (None, None) + input_grads
+#     @staticmethod
+#     def backward(ctx, *output_grads):
+#         ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
+#         with torch.enable_grad():
+#             # Fixes a bug where the first op in run_function modifies the Tensor storage
+#             # in place, which is not allowed for detach()'d Tensors.
+#             shallow_copies = [x.view_as(x) for x in ctx.input_tensors]
+#             output_tensors = ctx.run_function(*shallow_copies)
+#         input_grads = torch.autograd.grad(
+#             output_tensors,
+#             ctx.input_tensors + ctx.input_params,
+#             output_grads,
+#             allow_unused=True
+#         )
+#         del ctx.input_tensors
+#         del ctx.input_params
+#         del output_tensors
+#         return (None, None) + input_grads
 
-def checkpoint(func, inputs, params, flag):
-    """
-    Evaluate a function without caching intermediate activations, allowing for
-    reduced memory at the expense of extra compute in the backward pass.
+# def checkpoint(func, inputs, params, flag):
+#     """
+#     Evaluate a function without caching intermediate activations, allowing for
+#     reduced memory at the expense of extra compute in the backward pass.
     
-    Args:
-    func: A function to evaluate,
-    inputs: Argument sequence to pass to `func`.
-    params: A sequence of parameters `func` depends on but does not explicitly
-            take as arguments.
-    param flag: If False, disable gradient checkpointing
-    """
-    if flag:
-        args = tuple(inputs) + tuple(params)
-        return CheckpointFunction.apply(func, len(inputs), *args)
-    else:
-        return func(*inputs)
+#     Args:
+#     func: A function to evaluate,
+#     inputs: Argument sequence to pass to `func`.
+#     params: A sequence of parameters `func` depends on but does not explicitly
+#             take as arguments.
+#     param flag: If False, disable gradient checkpointing
+#     """
+#     if flag:
+#         args = tuple(inputs) + tuple(params)
+#         return CheckpointFunction.apply(func, len(inputs), *args)
+#     else:
+#         return func(*inputs)
 
 
 class GEGLU(nn.Module):
@@ -165,11 +145,7 @@ class QKVAttentionLegacy(nn.Module):
             b, n, d = q.shape[0], q.shape[2], q.shape[1] // self.n_heads
         else:
             raise NotImplementedError
-        # b, width, n = qkv.shape # width = 3*c = 3*m*d
-        # assert width % (3 * self.n_heads) == 0
-        # d = width // (3 * self.n_heads)
-        
-        # q, k, v = rearrange(qkv, "b (m D) n -> (b m) D n", m=self.n_heads).split(d, dim=1) # (B, d, n), B = b*m, D = 3*d
+
         scale = 1 / math.sqrt(math.sqrt(d))
         
         # calculate attention score (more stable with f16 than dividing afterwards)
@@ -182,7 +158,7 @@ class QKVAttentionLegacy(nn.Module):
             weight.masked_fill_(~mask, max_neg_value(weight))
         
         # calculate attention weight (attention distribution)
-        weight = torch.softmax(weight, dim=-1).type(weight.dtype)
+        weight = torch.softmax(weight, dim=-1)
         
         # calculate attention output (context vector)
         a = torch.einsum("B i n, B d n -> B d i", weight, v) # (B, d, n)
@@ -200,7 +176,7 @@ class QKVAttention(nn.Module):
         super().__init__()
         self.n_heads = n_heads
     
-    def forward(self, qkv):
+    def forward(self, qkv, k=None, v=None, mask=None):
         """ Apply QKV attention
         
         Notation:
@@ -228,11 +204,7 @@ class QKVAttention(nn.Module):
             b, n = q.shape[0], q.shape[2]
         else:
             raise NotImplementedError
-        # b, width, n = qkv.shape
-        # assert width % (3 * self.n_heads) == 0
-        
-        # d = width // (3 * self.n_heads)
-        # q, k, v = qkv.chunk(3, dim=1) # (b c n)
+
         scale = 1 / math.sqrt(math.sqrt(d))
         
         q = rearrange(q*scale, "b (m d) n -> (b m) d n", m=self.n_heads) # (B d n), B=b*m
@@ -240,10 +212,15 @@ class QKVAttention(nn.Module):
         v = rearrange(v, "b (m d) n -> (b m) d n", m=self.n_heads) # (B d n)
         
         # calculate attention score (more stable with f16 than dividing afterwards)
-        weight = torch.einsum("B d i, B d j -> b i j", q, k) # (B n n)
+        weight = torch.einsum("B d i, B d j -> B i j", q, k) # (B n n)
+        
+        if mask is not None:
+            mask = rearrange(mask, "b ... -> b (...)")
+            mask = repeat(mask, "b j -> (b m) () j", m=self.n_heads)
+            weight.masked_fill_(~mask, max_neg_value(weight))
         
         # calculate attention weight (attention distribution)
-        weight = torch.softmax(weight.float(), dim=-1).type(weight.dtype)
+        weight = torch.softmax(weight.float(), dim=-1)
         
         # calculate attention ouptut (context vector)
         a = torch.einsum("B i n, B d n -> B d i", weight, v) # (B d n)
@@ -354,11 +331,11 @@ class CrossAttention(nn.Module):
         elif attention_type == "xformers":
             try:
                 from xformers.components.attention import ScaledDotProduct
-                self.attention = ScaledDotProduct
+                self.attention = ScaledDotProduct()
             except ImportError:
                 print("There's no xformers installed! Using QKVAttentionLegacy instead.")
                 self.attention = QKVAttentionLegacy(heads)
-        elif attention_type in "memory_efficient_attention|flash|flash16".split("|"):
+        elif attention_type in ["memory_efficient_attention", "flash", "flash16"]:
             try:
                 from xformers.ops import memory_efficient_attention
                 self.attention = memory_efficient_attention
@@ -373,7 +350,7 @@ class CrossAttention(nn.Module):
             nn.Dropout(dropout)
         )
     
-    def forwrad(self, x, context=None, mask=None):
+    def forward(self, x, context=None, mask=None):
         """
         Notation:
         b : Batch size
@@ -393,10 +370,8 @@ class CrossAttention(nn.Module):
             out = self.attention(q, k, v)
             out = rearrange(out, "b c n -> b n c")
         else:
-            # q, k, v = map(lambda t: rearrange(t, "b (m d) n -> b n m d", m=self.heads).contiguous(), (q, k, v))
             q, k, v = map(lambda t: rearrange(t, "b (m d) n -> (b m) n d", m=self.heads).contiguous(), (q, k, v)) # (B n d)
             out = self.attention(q, k, v)
-            # out = rearrange(out, "b n m d -> b n (m d)").contiguous() # (b n c)
             out = rearrange(out, "(b m) n d -> b n (m d)", m=self.heads).contiguous() # (b n c)
         return self.to_out(out)
         
@@ -425,7 +400,6 @@ class BasicTransformerBlock(nn.Module):
         dropout=0.,
         context_dim=None,
         gated_ff=True,
-        checkpoint=True,
         attention_type="qkv_legacy"
     ):
         super().__init__()
@@ -451,12 +425,8 @@ class BasicTransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(dim)
         self.norm3 = nn.LayerNorm(dim)
 
-        self.checkpoint = checkpoint
     
     def forward(self, x, context=None):
-        return checkpoint(self._forward, (x, context), self.parameters(), self.checkpoint)
-    
-    def _forward(self, x, context=None):
         x = self.attn1(self.norm1(x)) + x
         x = self.attn2(self.norm2(x), context=context) + x
         x = self.ff(self.norm3(x)) + x
@@ -464,7 +434,13 @@ class BasicTransformerBlock(nn.Module):
 
 
 class SpatialTransformer(nn.Module):
-    """ Transformer block for 2D data """
+    """ Transformer block for 2D data
+    
+    Process:
+        Project the input (embedding) and reshape it as (b, n, c)
+        → Apply standard transformer's operations
+        → Reshape to 2D data
+    """
     def __init__(
         self,
         in_channels,
@@ -491,7 +467,7 @@ class SpatialTransformer(nn.Module):
                     dropout=dropout,
                     context_dim=context_dim,
                     attention_type=attention_type
-                ) for d in range(depth)
+                ) for _ in range(depth)
             ])
         self.proj_out = zero_module(conv_nd(2, hidden_dim, in_channels, kernel_size=1, stride=1, padding=0))
     
@@ -499,14 +475,14 @@ class SpatialTransformer(nn.Module):
         """
         Notation:
         b : Batch size
-        c : channels of 2D input data
+        c : channels of the input data
         h : height
         w : width
         n : Sequence length (height * width in 2D)
         """
         # NOTE: If context is None, cross-attention defaults to self-attention
         b, c, *dims = x.shape
-        x_in = x
+        x_ = x.clone()
         
         x = self.norm(x)
         x = self.proj_in(x)
@@ -516,25 +492,33 @@ class SpatialTransformer(nn.Module):
         for block in self.transformer_blocks:
             x = block(x, context=context)
         
-        x = rearrange(x, "b (...) c -> b c ...", **{"d{}".format(i): dim for i, dim in enumerate(dims, start=1)}) # (b, c, h, w) for 2D
+        dims_pattern = " ".join("d{}".format(i) for i in range(len(dims))) # "d0 d1 d2 ..."
+        dim_dict = {"d{}".format(i): dims[i] for i in range(len(dims))} # d0: h, d1: w, ...
+        x = rearrange(x, "b ({}) c".format(dims_pattern) + " -> " + "b c " + dims_pattern, **dim_dict) # (b, c, d0, d1, ...)
         x = self.proj_out(x)
-        return x + x_in
+        return x + x_
 
 
 class AttentionBlock(nn.Module):
-    """ Attention block that allows spatial positions to attend to each other """
+    """ Attention block that allows spatial positions to attend to each other
+    
+    Process:
+        Project the input (embedding) and reshape it as (b, n, c)
+        → Apply standard transformer's operations
+        → Reshape to 2D data
+    """
     def __init__(
         self,
         channels,
         n_heads=1,
         dim_head=-1,
-        use_checkpoint=False,
         attention_type="qkv_legacy", # ["qkv", "qkv_legacy", "xformers", "falsh", "flash16"]
         num_groups=32
     ):
         super().__init__()
         
         self.channels = channels
+        self.attention_type = attention_type
         if dim_head == -1:
             self.n_heads = n_heads
         else:
@@ -542,7 +526,6 @@ class AttentionBlock(nn.Module):
                 channels % dim_head == 0
             ), "q, k, v channels {} is not divisible by number of head channels {}.".format(channels, dim_head)
             self.n_heads = channels // dim_head
-        self.use_checkpoint = use_checkpoint
         self.norm = nn.GroupNorm(num_groups=num_groups, num_channels=channels, eps=1e-6, affine=True)
         self.qkv = conv_nd(1, channels, channels*3, 1)
         
@@ -555,11 +538,11 @@ class AttentionBlock(nn.Module):
         elif attention_type == "xformers":
             try:
                 from xformers.components.attention import ScaledDotProduct
-                self.attention = ScaledDotProduct
+                self.attention = ScaledDotProduct()
             except ImportError:
                 print("There's no xformers installed! Using QKVAttentionLegacy instead.")
                 self.attention = QKVAttentionLegacy(self.n_heads)
-        elif attention_type in "memory_efficient_attention|flash|flash16".split("|"):
+        elif attention_type in ["memory_efficient_attention", "flash", "flash16"]:
             try:
                 from xformers.ops import memory_efficient_attention
                 self.attention = memory_efficient_attention
@@ -572,19 +555,15 @@ class AttentionBlock(nn.Module):
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
     
     def forward(self, x):
-        if self.training and self.use_checkpoint:
-            return checkpoint(self._forwrad, x)
-    
-    def _forward(self, x):
         b, c, *dims = x.shape
         
+        x_ = x.clone() # residual connection
+        
         # Flatten the data structure dimensions into sequence length (n)
-        x = rearrange("b c ... -> b c (...)")
-        x = self.norm(x)
+        x = rearrange(x, "b c ... -> b c (...)") # (b, c, n)
+        qkv = self.qkv(self.norm(x))
         
-        qkv = self.qkv(x)
-        
-        if self.attention_type in "qkv|qkv_legacy".split("|"):
+        if self.attention_type in ["qkv", "qkv_legacy"]:
             h_ = self.attention(qkv)
         else:
             # q, k, v = rearrange(qkv, "b (num m d) n -> num b n m d", num=3, m=self.n_heads)
@@ -601,11 +580,10 @@ class AttentionBlock(nn.Module):
         
         h_ = self.proj_out(h_)
         
-        # Reshape back to the original data structure # TODO: check if both two ways work
-        # pattern = "b c ... -> b c " + " ".join(["d{}".format(i) for i in range(1, len(dims)+1)])
-        # data_dim_dict = {"d{}".format(i): dim for i, dim in enumerate(dims, start=1)}
-        # h_ = rearrange(h_, pattern, **data_dim_dict)
-        h_ = rearrange(h_, "b c ... -> b c ...", **{"d{}".format(i): dim for i, dim in enumerate(dims, start=1)})
-        x = rearrange(x, "b c ... -> b c ...", **{"d{}".format(i): dim for i, dim in enumerate(dims, start=1)})
+        # Reshape back to the original data structure
+        dims_pattern = " ".join("d{}".format(i) for i in range(len(dims))) # "d0 d1 d2 ..."
+        dim_dict = {"d{}".format(i): dims[i] for i in range(len(dims))} # d0: h, d1: w, ...
+        h_ = rearrange(h_, "b c ({})".format(dims_pattern) + " -> " + "b c " + dims_pattern, **dim_dict) # (b, c, d0, d1, ...)
+        assert x_.shape == h_.shape
         
-        return x + h_
+        return x_ + h_

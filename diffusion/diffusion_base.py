@@ -136,7 +136,7 @@ class DiffusionBase(PostInitModule):
             x (Tensor): Tensor to be unsqueezed
             y (Tensor): Shape of the target Tensor to be unsqueezed
         """
-        return rearrange(x, "... -> ..." + " ".join(["()"] * (y.dim() - x.dim())))
+        return rearrange(x, "... -> ... " + " ".join(["()"] * (y.dim() - x.dim())))
 
     
     def _predict_xstart_from_eps(self, x_t, t, eps):
@@ -205,7 +205,7 @@ class DiffusionBase(PostInitModule):
 
         # get variance
         if self.model_var_type in ("learned", "learned_range"):
-            assert model_out.size(1) == 2 * x_t.size(1)
+            assert model_out.shape[1] == 2 * x_t.shape[1]
             model_out, tmp = torch.chunk(model_out, 2, dim=1)
             if self.model_var_type == "learned":
                 model_log_var = tmp

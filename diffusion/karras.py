@@ -3,7 +3,7 @@ from typing import Callable
 import numpy as np
 import torch
 from torch import Tensor, Size
-from jjuke.utils import interp1d # TODO: check if ti works not using "from scipy.interpolate import interp1d"
+from jjuke.utils import interp1d
 from einops import rearrange
 
 from .common import get_betas

@@ -4,6 +4,7 @@ import torch
 from torch import nn
 from jjuke.utils import conv_nd, zero_module
 
+from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .unet_modules import ResBlock, AttentionBlock, SpatialTransformer, \
     TimestepEmbedSequential, Downsample, Upsample, timestep_embedding
 
@@ -17,22 +18,26 @@ class UNetModel(nn.Module):
         out_channels: Channels in the output tensor.
         model_channels: Base channel count for the model.
         num_res_blocks: Number of residual blocks per downsampling.
-        attention_resolutions: Collection of downsample rates at which attention
-                               will take place. May be a set, list, or tuple. For
-                               example, if it contains 4, then at 4x downsampling,
-                               attention will be used.
+        attention_resolutions: Collection of downsample rates at which attention will take place.
+                               May be a set, list, or tuple. For example, if it contains 4,
+                               then at 4x downsampling, attention will be used.
         dropout: Dropout probability.
         channel_mult: Channel multiplier for each level of the Unet.
         conv_resample: If True, use learned convolutions for upsampling and downsampling.
-        num_classes: If Specified, then this model will be class-conditional with
-                     `num_classes` classes.
-        use_checkpoint: Use gradient checkpointing to reduce memory usage.
         num_heads: Number of attention heads in each attention layer.
-        dim_head: If specified, ignore num_heads and instead use a fixed channel
-                  width per attention head.
-        use_scale_shift_norm: Use a FiLM-like conditioning mechanism. Deprecated.
+        dim_head: If specified, ignore num_heads and instead use a fixed channel width per attention head.
         resblock_updown: Use residual blocks for upsampling and downsampling.
         attention_type: Type of attention.
+        
+        Conditioning
+        attention_fn: Determine what function to use for the attention. It should be "spatial_transformer"
+                      if using cross-attention conditioning.
+        context_dim: Dimension of cross-attention conditioning
+        transformer_depth: Depth of the transformer
+        num_classes: If specified, then this model will be class-conditional with `num_classes` classes.
+        
+        
+        
     """
     def __init__(
         self,
@@ -40,33 +45,33 @@ class UNetModel(nn.Module):
         in_channels=3,
         out_channels=3,
         model_channels=64,
-        num_res_blocks=2,
-        attention_resolutions=[2],
+        num_res_blocks=2, # depth of the model
+        # spatial_res=128, # spatial resolution (h, w of feature maps)
+        attention_resolutions=[2], # downsampling factor = (spatial resolution (h, w of feature maps) / cross-attention resolution(s))
         dropout=0.,
         channel_mult=[1, 2, 4, 8],
         conv_resample=True,
-        num_classes=None,
-        use_checkpoint=False,
+        # use_checkpoint=False, # use gradient checkpointing to reduce memory usage
         num_heads=-1,
         dim_head=-1,
         resblock_updown=False,
-        use_spatial_transformer=False, # custom transformer support
-        transformer_depth=1, # custom transformer support
-        context_dim=None, # custom transformer support
-        # n_embed=None, # custom support for prediction of discrete ids into codebook of first stage vq model
         attention_type="qkv_legacy", # ["qkv", "qkv_legacy", "xformers", "memory_efficient_attention"]
-        no_attn=False,
+        attention_fn="attention_block", # ["attention_block", "spatial_transformer", "no_attention"]
+        context_dim=None,
+        transformer_depth=1,
+        num_classes=None,
+        # n_embed=None, # custom support for prediction of discrete ids into codebook of first stage vq model
         no_time_emb=False,
         is_autoencoder=False,
         num_groups=32
     ):
         super().__init__()
         
-        if use_spatial_transformer:
+        if attention_fn == "spatial_transformer":
             assert context_dim is not None, "The dimension of cross-attention conditioning should be included."
         
         if context_dim is not None:
-            assert use_spatial_transformer, "Spatial transformer should be used for cross-attention conditioning."
+            assert attention_fn == "spatial_transformer", "Spatial transformer should be used for cross-attention conditioning."
             from omegaconf.listconfig import ListConfig
             if type(context_dim) == ListConfig:
                 context_dim = list(context_dim)
@@ -79,7 +84,7 @@ class UNetModel(nn.Module):
         self.no_time_emb = no_time_emb
         self.is_autoencoder = is_autoencoder
         self.attention_type = attention_type
-        self.use_spatial_transformer = use_spatial_transformer
+        self.attention_fn = attention_fn
         
         # time embedding
         if not no_time_emb or self.num_classes is not None:
@@ -104,19 +109,19 @@ class UNetModel(nn.Module):
             emb_channels=time_embed_dim,
             dropout=dropout,
             num_groups=num_groups,
-            dims=unet_dim,
-            use_checkpoint=use_checkpoint,
+            unet_dim=unet_dim,
+            # use_checkpoint=use_checkpoint,
         )
-        if not use_spatial_transformer:
+        if attention_fn == "attention_block":
             attn_fn = lambda ch, num_heads, dim_head: AttentionBlock(
                 channels=ch,
                 n_heads=num_heads,
                 dim_head=dim_head,
-                use_checkpoint=use_checkpoint,
+                # use_checkpoint=use_checkpoint,
                 attention_type=attention_type,
                 num_groups=num_groups
             )
-        else:
+        elif attention_fn == "spatial_transformer":
             attn_fn = lambda ch, num_heads, dim_head: SpatialTransformer(
                 in_channels=ch,
                 n_heads=num_heads,
@@ -125,8 +130,10 @@ class UNetModel(nn.Module):
                 context_dim=context_dim,
                 attention_type=attention_type
             )
-        if no_attn:
+        elif attention_fn == "no_attention":
             attn_fn = lambda *args, **kwargs: nn.Identity()
+        else:
+            raise NotImplementedError
         
         # downsampling part
         self.input_blocks = nn.ModuleList([
@@ -152,7 +159,7 @@ class UNetModel(nn.Module):
                     TimestepEmbedSequential(
                         res_fn(channel, out_channels=out_channel, down=True)
                         if resblock_updown
-                        else Downsample(channel, conv_resample, dims=unet_dim, out_channels=out_channel)
+                        else Downsample(channel, conv_resample, unet_dim=unet_dim, out_channels=out_channel)
                     ))
                 channel = out_channel
                 input_block_channels.append(channel)
@@ -168,10 +175,11 @@ class UNetModel(nn.Module):
         )
         self._feature_size += channel
         
+        # upsampling part
         self.output_blocks = nn.ModuleList([])
         for level, mult in list(enumerate(channel_mult))[::-1]:
             for i in range(num_res_blocks + 1):
-                i_channel = input_block_channels.pop()
+                i_channel = channel + input_block_channels.pop() if not is_autoencoder else channel
                 layers = [res_fn(i_channel, out_channels=model_channels*mult)]
                 channel = model_channels * mult
                 if ds in attention_resolutions:
@@ -182,7 +190,7 @@ class UNetModel(nn.Module):
                     layers.append(
                         res_fn(channel, out_channels=out_channel, up=True)
                         if resblock_updown
-                        else Upsample(channel, conv_resample, dims=unet_dim, out_channels=out_channel)
+                        else Upsample(channel, conv_resample, unet_dim=unet_dim, out_channels=out_channel)
                     )
                     ds //= 2
                 self.output_blocks.append(TimestepEmbedSequential(*layers))
@@ -204,11 +212,29 @@ class UNetModel(nn.Module):
             d_head = channel // num_heads
         else:
             num_heads = channel // dim_head
-            d_head
+            d_head = dim_head
         if self.attention_type == "qkv_kegacy":
             # num_heads = 1
-            d_head = channel // num_heads if self.use_spatial_transformer else dim_head
+            d_head = channel // num_heads if (self.attention_fn == "spatial_transformer") else dim_head
         return d_head, num_heads
+    
+    
+    def convert_to_fp16(self):
+        """ Convert the torso of the model to float16 """
+        self.input_blocks.apply(convert_module_to_f16)
+        self.middle_block.apply(convert_module_to_f16)
+        self.output_blocks.apply(convert_module_to_f16)
+    
+    def convert_to_fp32(self):
+        """ Convert the torso of the model to float32 """
+        self.input_blocks.apply(convert_module_to_f32)
+        self.middle_block.apply(convert_module_to_f32)
+        self.output_blocks.apply(convert_module_to_f32)
+    
+    @property
+    def inner_dtype(self):
+        """ Get the dtype used by the torso of the model """
+        return next(self.input_blocks.parameters()).dtype
     
     
     def get_embedding(self, t=None, y=None):
@@ -227,11 +253,14 @@ class UNetModel(nn.Module):
             assert emb is not None
         
         hs = []
-        h = x
+        h = x.type(self.inner_dtype)
+        
         for module in self.input_blocks:
             h = module(h, emb, context)
             if not self.is_autoencoder:
                 hs.append(h)
+
+        return h, hs
     
     def decode(self, h, hs=None, emb=None, context=None):
         if not self.is_autoencoder:
@@ -240,23 +269,39 @@ class UNetModel(nn.Module):
             assert emb is not None
         
         h = self.middle_block(h, emb, context)
+        
         for module in self.output_blocks:
             if not self.is_autoencoder:
                 h = torch.cat([h, hs.pop()], dim=1)
             h = module(h, emb, context)
+        
         h = self.out(h)
+
         return h
     
     def forward(self, x, t=None, context=None, y=None):
         emb = self.get_embedding(t=t, y=y)
         h, hs = self.encode(x, emb, context=context)
         h = self.decode(h, hs, emb, context=context)
+        
         return h
 
 
 if __name__ == "__main__":
     model = UNetModel(unet_dim=1, in_channels=1, out_channels=1, dim_head=32, attention_type="xformers")
-    x = torch.rand(2, 1, 1024)
+    x = torch.rand(2, 1, 1024) # (b, in_c, n)
     t = torch.randint(0, 1000, (2,))
     out = model(x, t)
-    print(out.shape)
+    print("1D model output shape: ", out.shape) # (b, out_c, n)
+    
+    model = UNetModel(unet_dim=2, in_channels=3, out_channels=1, dim_head=32, attention_type="qkv")
+    x = torch.rand(8, 3, 32, 32) # (b, c_in, h, w)
+    t = torch.randint(0, 1000, (8,))
+    out = model(x, t)
+    print("2D model output shape: ", out.shape) # (b, c_out, h, w)
+    
+    model = UNetModel(unet_dim=3, in_channels=1, out_channels=1, dim_head=32, attention_type="memory_efficient_attention").cuda()
+    x = torch.rand(8, 1, 32, 32, 32).cuda() # (b, c_in, x, y, z)
+    t = torch.randint(0, 1000, (8,)).cuda()
+    out = model(x, t)
+    print("3D model output shape: ", out.shape) # (b, c_out, x, y, z)

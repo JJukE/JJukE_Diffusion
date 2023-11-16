@@ -1,4 +1,4 @@
-""" Modules for general conditional U-Net models (1D, 2D for LDM)
+""" Modules for general conditional U-Net models
 from https://github.com/CompVis/latent-diffusion/tree/main and
 from https://github.com/Kitsunetic/DFusion/tree/master/dfusion/models/kitsunetic
 """
@@ -70,22 +70,22 @@ class Upsample(nn.Module):
     Args:
         channels: Channels in the inputs and outputs.
         use_conv: Determine if a convolution is applied.
-        dims: Determines if the signal is 1D, 2D, or 3D. If 3D, then
+        unet_dim: Determines if the signal is 1D, 2D, or 3D. If 3D, then
               upsampling occurs in the inner-two dimensions.
     """
-    def __init__(self, channels, use_conv, dims=2, out_channels=None, padding=1):
+    def __init__(self, channels, use_conv, unet_dim=2, out_channels=None, padding=1):
         super().__init__()
         
         self.channels = channels
         self.out_channels = default(out_channels, channels)
         self.use_conv = use_conv
-        self.dims = dims
+        self.unet_dim = unet_dim
         if use_conv:
-            self.conv = conv_nd(dims, self.channels, self.out_channels, 3, padding=padding)
+            self.conv = conv_nd(unet_dim, self.channels, self.out_channels, 3, padding=padding)
     
     def forward(self, x):
         assert x.shape[1] == self.channels
-        if self.dims == 3:
+        if self.unet_dim == 3:
             x = F.interpolate(
                 x, (x.shape[2], x.shape[3]*2, x.shape[4]*2), mode="nearest"
             )
@@ -117,25 +117,25 @@ class Downsample(nn.Module):
     Args:
         channels: Channels in the inputs and outputs.
         use_conv: Determine if a convolution is applied.
-        dims: Determines if the signal is 1D, 2D, or 3D. If 3D, then
+        unet_dim: Determines if the signal is 1D, 2D, or 3D. If 3D, then
               upsampling occurs in the inner-two dimensions.
     """
-    def __init__(self, channels, use_conv, dims=2, out_channels=None, padding=1):
+    def __init__(self, channels, use_conv, unet_dim=2, out_channels=None, padding=1):
         super().__init__()
         
         self.channels = channels
         self.out_channels = default(out_channels, channels)
         self.use_conv = use_conv
-        self.dims = dims
-        stride = 2 if dims != 3 else (1, 2, 2)
+        self.unet_dim = unet_dim
+        stride = 2 if unet_dim != 3 else (1, 2, 2)
         
         if use_conv:
             self.op = conv_nd(
-                dims, self.channels, self.out_channels, 3, stride=stride, padding=padding
+                unet_dim, self.channels, self.out_channels, 3, stride=stride, padding=padding
             )
         else:
             assert self.channels == self.out_channels
-            self.op = avg_pool_nd(dims, kernel_size=stride, stride=stride)
+            self.op = avg_pool_nd(unet_dim, kernel_size=stride, stride=stride)
     
     def forward(self, x):
         assert x.shape[1] == self.channels
@@ -153,7 +153,7 @@ class ResBlock(TimestepBlock):
         use_conv: If True and out_channels is specified, use a spatial conv
                   instead of a smaller 1x1 conv to change the channels in
                   the skip connection.
-        dims: Determines if the signal is 1D, 2D, or 3D.
+        unet_dim: Determines if the signal is 1D, 2D, or 3D.
         use_checkpoint: If True, use gradient checkpointing on this module.
         sampling_type: If "up", use this block for upsampling, and if "down",
                        use this block for downsampling. ["up", "down"]
@@ -165,8 +165,7 @@ class ResBlock(TimestepBlock):
         dropout,
         out_channels=None,
         use_conv=False,
-        use_scale_shift_norm=False,
-        dims=2,
+        unet_dim=2,
         use_checkpoint=False,
         up=False,
         down=False,
@@ -180,48 +179,44 @@ class ResBlock(TimestepBlock):
         self.out_channels = default(out_channels, channels)
         self.use_conv = use_conv
         self.use_checkpoint = use_checkpoint
-        self.use_scale_shift_norm = use_scale_shift_norm
         
         self.in_layers = nn.Sequential(
-            nn.GroupNorm(num_groups=num_groups, num_channels=self.out_channels, eps=1e-6, affine=True),
+            nn.GroupNorm(num_groups=num_groups, num_channels=self.channels, eps=1e-6, affine=True),
             nn.SiLU(),
-            conv_nd(dims, channels, self.out_channels, 3, padding=1)
+            conv_nd(unet_dim, channels, self.out_channels, 3, padding=1)
         )
         
         self.updown = up or down
         
         if up:
-            self.h_upd = Upsample(channels, False, dims)
-            self.x_upd = Upsample(channels, False, dims)
+            self.h_upd = Upsample(channels, False, unet_dim)
+            self.x_upd = Upsample(channels, False, unet_dim)
         elif down:
-            self.h_upd = Downsample(channels, False, dims)
-            self.x_upd = Downsample(channels, False, dims)
+            self.h_upd = Downsample(channels, False, unet_dim)
+            self.x_upd = Downsample(channels, False, unet_dim)
         else:
             self.h_upd = self.x_upd = nn.Identity()
         
         self.emb_layers = nn.Sequential(
             nn.SiLU(),
-            nn.Dropout(p=dropout),
-            zero_module(
-                conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)
-            )
-        )
+            nn.Linear(emb_channels, self.out_channels)
+        ) if emb_channels is not None else None
         
         self.out_layers = nn.Sequential(
             nn.GroupNorm(num_groups=num_groups, num_channels=self.out_channels, eps=1e-6, affine=True),
             nn.SiLU(),
             nn.Dropout(dropout),
             zero_module(
-                conv_nd(dims, self.out_channels, self.out_channels, 3, padding=1)
+                conv_nd(unet_dim, self.out_channels, self.out_channels, 3, padding=1)
             )
         )
         
         if self.out_channels == channels:
             self.skip_connection = nn.Identity()
         elif use_conv:
-            self.skip_connection = conv_nd(dims, channels, self.out_channels, 3, padding=1)
+            self.skip_connection = conv_nd(unet_dim, channels, self.out_channels, 3, padding=1)
         else:
-            self.skip_connection = conv_nd(dims, channels, self.out_channels, 1)
+            self.skip_connection = conv_nd(unet_dim, channels, self.out_channels, 1)
     
     def forward(self, x, emb):
         """ Apply the block to a Tensor, conditioned on a timestep embedding
@@ -233,9 +228,12 @@ class ResBlock(TimestepBlock):
         Returns:
             (n, c, ...) tensor of outputs.
         """
-        return checkpoint(self._forward, (x, emb), self.parameters(), self.use_checkpoint)
+        if self.use_checkpoint and self.training:
+            return checkpoint(self._forward, x, emb)
+        else:
+            return self._forward(x, emb)
 
-    def _forward(self, x, emb):
+    def _forward(self, x, emb=None):
         if self.updown:
             in_rest, in_conv = self.in_layers[:-1], self.in_layers[-1]
             h = in_rest(x)
@@ -245,17 +243,20 @@ class ResBlock(TimestepBlock):
         else:
             h = self.in_layers(x)
         
-        emb_out = self.emb_layers(emb).type(h.dtype)
-        while len(emb_out.shape) < len(h.shape):
-            emb_out = emb_out[..., None]
+        if self.emb_layers is not None:
+            emb_out = self.emb_layers(emb) # .type(h.dtype)
+            emb_out = rearrange(emb_out, "... -> ..." + " ".join(["()"] * (x.dim() - emb_out.dim()))) # unsqueeze as x
         
-        if self.use_scale_shift_norm:
-            out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
-            scale, shift = torch.chunk(emb_out, 2, dim=1)
-            h = out_norm(h) * (1 + scale) + shift
-            h = out_rest(h)
-        else:
+            # if self.use_scale_shift_norm:
+            #     out_norm, out_rest = self.out_layers[0], self.out_layers[1:]
+            #     scale, shift = torch.chunk(emb_out, 2, dim=1)
+            #     h = out_norm(h) * (1 + scale) + shift
+            #     h = out_rest(h)
+            # else:
             h = h + emb_out
+            h = self.out_layers(h)
+        
+        else:
             h = self.out_layers(h)
         
         return self.skip_connection(x) + h
