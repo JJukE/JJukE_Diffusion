@@ -6,7 +6,6 @@ Diffusion bases for other various models
 .
 |-- README.md
 |-- __init__.py
-|-- common.py
 |-- diffusion
 |   |-- __init__.py
 |   |-- common.py
@@ -19,13 +18,13 @@ Diffusion bases for other various models
 |-- unet
 |   |-- __init__.py
 |   |-- base_modules.py
-|   |-- ldm_unet.py
-|   |-- transformer.py
 |   |-- unet_base.py
-|   |-- unet_cond.py
 |   `-- unet_modules.py
-`-- unet_ldm
+`-- unet_cond
+    |-- __init__.py
     |-- attention.py
+    |-- fp16_util.py
+    |-- transformer.py
     |-- unet.py
     `-- unet_modules.py
 ```
