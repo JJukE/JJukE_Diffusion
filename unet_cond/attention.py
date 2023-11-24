@@ -141,8 +141,9 @@ class QKVAttentionLegacy(nn.Module):
             d = width // (3 * self.n_heads)
             q, k, v = rearrange(qkv, "b (m D) n -> (b m) D n", m=self.n_heads).split(d, dim=1) # (B, d, n), B=b*m, D=3*d
         elif k is not None and v is not None:
-            q, k, v = qkv, k, v
-            b, n, d = q.shape[0], q.shape[2], q.shape[1] // self.n_heads
+            assert qkv.shape[1] == k.shape[1] and k.shape[1] == v.shape[1], "Channel of query, key, value are should be same!"
+            b, n, d = k.shape[0], k.shape[2], k.shape[1] // self.n_heads
+            q, k, v = map(lambda t: rearrange(t, "b (m d) n -> (b m) d n", m=self.n_heads).contiguous(), (qkv, k, v)) # (B d n)
         else:
             raise NotImplementedError
 
@@ -201,7 +202,7 @@ class QKVAttention(nn.Module):
             q, k, v = qkv.chunk(3, dim=1) # (b, c, n)
         elif k is not None and v is not None:
             q, k, v = qkv, k, v
-            b, n = q.shape[0], q.shape[2]
+            b, n, d = q.shape[0], q.shape[2], q.shape[1] // self.n_heads
         else:
             raise NotImplementedError
 
@@ -410,7 +411,7 @@ class BasicTransformerBlock(nn.Module):
             dim_head=dim_head,
             dropout=dropout,
             attention_type=attention_type
-        ) # self-attention
+        ) # self-attention (no context_dim)
         self.ff = FeedForward(dim, dropout=dropout, glu=gated_ff)
         self.attn2 = CrossAttention(
             query_dim=dim,

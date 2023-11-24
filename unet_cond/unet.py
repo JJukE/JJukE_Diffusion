@@ -4,9 +4,9 @@ import torch
 from torch import nn
 from jjuke.utils import conv_nd, zero_module
 
-from .fp16_util import convert_module_to_f16, convert_module_to_f32
-from .unet_modules import ResBlock, AttentionBlock, SpatialTransformer, \
-    TimestepEmbedSequential, Downsample, Upsample, timestep_embedding
+from unet_cond.fp16_util import convert_module_to_f16, convert_module_to_f32 #####
+from unet_cond.unet_modules import ResBlock, AttentionBlock, SpatialTransformer, \
+    TimestepEmbedSequential, Downsample, Upsample, timestep_embedding #####
 
 
 class UNetModel(nn.Module):
@@ -213,7 +213,7 @@ class UNetModel(nn.Module):
         else:
             num_heads = channel // dim_head
             d_head = dim_head
-        if self.attention_type == "qkv_kegacy":
+        if self.attention_type == "qkv_legacy":
             # num_heads = 1
             d_head = channel // num_heads if (self.attention_fn == "spatial_transformer") else dim_head
         return d_head, num_heads
@@ -288,20 +288,40 @@ class UNetModel(nn.Module):
 
 
 if __name__ == "__main__":
-    model = UNetModel(unet_dim=1, in_channels=1, out_channels=1, dim_head=32, attention_type="xformers")
-    x = torch.rand(2, 1, 1024) # (b, in_c, n)
-    t = torch.randint(0, 1000, (2,))
-    out = model(x, t)
-    print("1D model output shape: ", out.shape) # (b, out_c, n)
+    # model = UNetModel(unet_dim=1, in_channels=1, out_channels=1, dim_head=32, attention_type="xformers")
+    # x = torch.rand(2, 1, 1024) # (b, in_c, n)
+    # t = torch.randint(0, 1000, (2,))
+    # out = model(x, t)
+    # print("1D model output shape: ", out.shape) # (b, out_c, n)
     
-    model = UNetModel(unet_dim=2, in_channels=3, out_channels=1, dim_head=32, attention_type="qkv")
-    x = torch.rand(8, 3, 32, 32) # (b, c_in, h, w)
-    t = torch.randint(0, 1000, (8,))
-    out = model(x, t)
-    print("2D model output shape: ", out.shape) # (b, c_out, h, w)
+    # model = UNetModel(unet_dim=2, in_channels=3, out_channels=1, dim_head=32, attention_type="qkv")
+    # x = torch.rand(8, 3, 32, 32) # (b, c_in, h, w)
+    # t = torch.randint(0, 1000, (8,))
+    # out = model(x, t)
+    # print("2D model output shape: ", out.shape) # (b, c_out, h, w)
     
-    model = UNetModel(unet_dim=3, in_channels=1, out_channels=1, dim_head=32, attention_type="memory_efficient_attention").cuda()
-    x = torch.rand(8, 1, 32, 32, 32).cuda() # (b, c_in, x, y, z)
-    t = torch.randint(0, 1000, (8,)).cuda()
-    out = model(x, t)
-    print("3D model output shape: ", out.shape) # (b, c_out, x, y, z)
+    # model = UNetModel(unet_dim=3, in_channels=1, out_channels=1, dim_head=32, attention_type="memory_efficient_attention").cuda()
+    # x = torch.rand(8, 1, 32, 32, 32).cuda() # (b, c_in, x, y, z)
+    # t = torch.randint(0, 1000, (8,)).cuda()
+    # out = model(x, t)
+    # print("3D model output shape: ", out.shape) # (b, c_out, x, y, z)
+    
+    # for feature maps
+    x = torch.rand(1, 96, 128, 128).cuda()
+    t = torch.randint(0, 1000, (1,)).cuda()
+    cond = torch.rand(1, 1280, 77).cuda()
+    model = UNetModel(
+        unet_dim=2,
+        in_channels=96,
+        out_channels=96,
+        model_channels=320,
+        attention_resolutions=[16, 8, 4],
+        channel_mult=[1, 2, 4, 4],
+        num_heads=8,
+        attention_type="qkv_legacy",
+        attention_fn="spatial_transformer",
+        transformer_depth=1,
+        context_dim=1280
+    ).cuda()
+    out = model(x, t, cond)
+    print("Conditioned model output shape: ", out.shape)
