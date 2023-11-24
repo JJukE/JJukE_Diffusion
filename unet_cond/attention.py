@@ -470,7 +470,8 @@ class SpatialTransformer(nn.Module):
                     attention_type=attention_type
                 ) for _ in range(depth)
             ])
-        self.proj_out = zero_module(conv_nd(2, hidden_dim, in_channels, kernel_size=1, stride=1, padding=0))
+        self.proj_out = zero_module(conv_nd(2, hidden_dim, in_channels, kernel_size=1, stride=1, padding=0)) # for use
+        # self.proj_out = conv_nd(2, hidden_dim, in_channels, kernel_size=1, stride=1, padding=0) # for code test
     
     def forward(self, x, context=None):
         """
@@ -553,7 +554,8 @@ class AttentionBlock(nn.Module):
         else:
             raise NotImplementedError(attention_type)
         
-        self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
+        self.proj_out = zero_module(conv_nd(1, channels, channels, 1)) # for use
+        # self.proj_out = conv_nd(1, channels, channels, 1) # for code test
     
     def forward(self, x):
         b, c, *dims = x.shape

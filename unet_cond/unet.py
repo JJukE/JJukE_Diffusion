@@ -4,9 +4,9 @@ import torch
 from torch import nn
 from jjuke.utils import conv_nd, zero_module
 
-from unet_cond.fp16_util import convert_module_to_f16, convert_module_to_f32 #####
-from unet_cond.unet_modules import ResBlock, AttentionBlock, SpatialTransformer, \
-    TimestepEmbedSequential, Downsample, Upsample, timestep_embedding #####
+from .fp16_util import convert_module_to_f16, convert_module_to_f32
+from .unet_modules import ResBlock, AttentionBlock, SpatialTransformer, \
+    TimestepEmbedSequential, Downsample, Upsample, timestep_embedding
 
 
 class UNetModel(nn.Module):
@@ -202,8 +202,8 @@ class UNetModel(nn.Module):
         self.out = nn.Sequential(
             nn.GroupNorm(num_groups=num_groups, num_channels=channel, eps=1e-6, affine=True),
             nn.SiLU(),
-            zero_module(conv_nd(unet_dim, model_channels, out_channels, 3, padding=1)),
-            # conv_nd(unet_dim, mdoel_channels, out_channels, 3, padding=1)
+            zero_module(conv_nd(unet_dim, model_channels, out_channels, 3, padding=1)), # for use
+            # conv_nd(unet_dim, model_channels, out_channels, 3, padding=1) # for code test
         )
     
     
@@ -292,18 +292,21 @@ if __name__ == "__main__":
     # x = torch.rand(2, 1, 1024) # (b, in_c, n)
     # t = torch.randint(0, 1000, (2,))
     # out = model(x, t)
+    # print(out)
     # print("1D model output shape: ", out.shape) # (b, out_c, n)
     
     # model = UNetModel(unet_dim=2, in_channels=3, out_channels=1, dim_head=32, attention_type="qkv")
     # x = torch.rand(8, 3, 32, 32) # (b, c_in, h, w)
     # t = torch.randint(0, 1000, (8,))
     # out = model(x, t)
+    # print(out)
     # print("2D model output shape: ", out.shape) # (b, c_out, h, w)
     
     # model = UNetModel(unet_dim=3, in_channels=1, out_channels=1, dim_head=32, attention_type="memory_efficient_attention").cuda()
     # x = torch.rand(8, 1, 32, 32, 32).cuda() # (b, c_in, x, y, z)
     # t = torch.randint(0, 1000, (8,)).cuda()
     # out = model(x, t)
+    # print(out)
     # print("3D model output shape: ", out.shape) # (b, c_out, x, y, z)
     
     # for feature maps
@@ -324,4 +327,5 @@ if __name__ == "__main__":
         context_dim=1280
     ).cuda()
     out = model(x, t, cond)
+    print(out)
     print("Conditioned model output shape: ", out.shape)

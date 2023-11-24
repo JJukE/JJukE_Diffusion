@@ -206,9 +206,8 @@ class ResBlock(TimestepBlock):
             nn.GroupNorm(num_groups=num_groups, num_channels=self.out_channels, eps=1e-6, affine=True),
             nn.SiLU(),
             nn.Dropout(dropout),
-            zero_module(
-                conv_nd(unet_dim, self.out_channels, self.out_channels, 3, padding=1)
-            )
+            zero_module(conv_nd(unet_dim, self.out_channels, self.out_channels, 3, padding=1)) # for use
+            # conv_nd(unet_dim, self.out_channels, self.out_channels, 3, padding=1) # for code test
         )
         
         if self.out_channels == channels:
