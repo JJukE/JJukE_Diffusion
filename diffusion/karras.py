@@ -3,7 +3,8 @@ from typing import Callable
 import numpy as np
 import torch
 from torch import Tensor, Size
-from jjuke.utils import interp1d
+from scipy.interpolate import interp1d
+# from jjuke.utils import interp1d
 from einops import rearrange
 
 from .common import get_betas
@@ -64,13 +65,13 @@ class KarrasSampler(DiffusionBase):
             self.gammas[s_tmin <= self.sigmas[:-1]] = min(self.s_churn / (len(self.sigmas) - 1), 2 ** 0.5 - 1)
 
             sigmas_alphas_cumprod = 1. / (self.sigmas[:-1] ** 2 + 1)
-            # alphas_cumprod_to_t = interp1d(self.alphas_cumprod, np.arange(0, self.num_timesteps)) # for scipy.interpolate.interp1d
+            alphas_cumprod_to_t = interp1d(self.alphas_cumprod, np.arange(0, self.num_timesteps))
             c1 = sigmas_alphas_cumprod > self.alphas_cumprod[0]
             c2 = sigmas_alphas_cumprod <= self.alphas_cumprod[-1]
             c3 = ~(c1 | c2)
             self.karras_t_sigmas = np.zeros_like(sigmas_alphas_cumprod)
             self.karras_t_sigmas[c2] = self.num_timesteps - 1
-            self.karras_t_sigmas[c3] = interp1d(self.alphas_cumprod, np.arange(0, self.num_timesteps), sigmas_alphas_cumprod[c3]) # alphas_cumprod_to_t(sigmas_alphas_cumprod[c3]) # for scipy.interpolate.interp1d
+            self.karras_t_sigmas[c3] = alphas_cumprod_to_t(sigmas_alphas_cumprod[c3])
 
             self.sigmas_hat = self.sigmas[:-1] * (self.gammas + 1)
             sigmas_hat_alphas_cumprod = 1. / (self.sigmas_hat ** 2 + 1)
@@ -79,7 +80,7 @@ class KarrasSampler(DiffusionBase):
             c3 = ~(c1 | c2)
             self.karras_t_sigmas_hat = np.zeros_like(sigmas_hat_alphas_cumprod)
             self.karras_t_sigmas_hat[c2] = self.num_timesteps - 1
-            self.karras_t_sigmas_hat[c3] = interp1d(self.alphas_cumprod, np.arange(0, self.num_timesteps), sigmas_hat_alphas_cumprod[c3]) # alphas_cumprod_to_t(sigmas_hat_alphas_cumprod[c3]) # for scipy.interpolate.interp1d
+            self.karras_t_sigmas_hat[c3] = alphas_cumprod_to_t(sigmas_hat_alphas_cumprod[c3])
 
             self.sigmas_mid = ((self.sigmas_hat ** (1/3) + self.sigmas[1:] ** (1/3)) / 2) ** 3
             sigmas_mid_alphas_cumprod = 1. / (self.sigmas_mid ** 2 + 1)
@@ -88,7 +89,7 @@ class KarrasSampler(DiffusionBase):
             c3 = ~(c1 | c2)
             self.karras_t_sigmas_mid = np.zeros_like(sigmas_mid_alphas_cumprod)
             self.karras_t_sigmas_mid[c2] = self.num_timesteps - 1
-            self.karras_t_sigmas_mid[c3] = interp1d(self.alphas_cumprod, np.arange(0, self.num_timesteps), sigmas_mid_alphas_cumprod[c3]) # alphas_cumprod_to_t(sigmas_mid_alphas_cumprod[c3]) # for scipy.interpolate.interp1d
+            self.karras_t_sigmas_mid[c3] = alphas_cumprod_to_t(sigmas_mid_alphas_cumprod[c3])
 
     @staticmethod
     def to_d(x, sigma, denoised):
