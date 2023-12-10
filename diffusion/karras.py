@@ -5,7 +5,7 @@ import torch
 from torch import Tensor, Size
 from scipy.interpolate import interp1d
 # from jjuke.utils import interp1d
-from einops import rearrange
+from einops import rearrange, repeat
 
 from .common import get_betas
 from .diffusion_base import DiffusionBase
@@ -108,7 +108,7 @@ class KarrasSampler(DiffusionBase):
         sigma_down = (sigma_to**2 - sigma_up**2) ** 0.5
         return sigma_down, sigma_up
     
-    def sample_heun(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size):
+    def sample_heun(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size, condition = None):
         """
         Implements Algorithm 2 (Heun steps) from Karras et al. (2022).
 
@@ -129,7 +129,7 @@ class KarrasSampler(DiffusionBase):
             
             t = torch.full((batch_size,), self.karras_t_sigmas_hat[i], device=self.device, dtype=torch.long)
             c_in = self.unsqueeze_as(1. / (sigma_hat ** 2 + 1) ** 0.5, x)
-            denoised = self.p_mean_variance(denoise_fn, x * c_in, t)["pred_x_start"]
+            denoised = self.p_mean_variance(denoise_fn, x * c_in, t, condition)["pred_x_start"]
             d = self.to_d(x, sigma_hat, denoised)
             yield x, denoised
 
@@ -142,13 +142,13 @@ class KarrasSampler(DiffusionBase):
                 x_2 = x + d * dt
                 t_2 = torch.full((batch_size,), self.karras_t_sigmas[i+1], device=self.device, dtype=torch.long)
                 c_in_2 = self.unsqueeze_as(1. / (self.sigmas[i+1] ** 2 + 1) ** 0.5, x_2)
-                denoised_2 = self.p_mean_variance(denoise_fn, x_2 * c_in_2, t_2)["pred_x_start"]
+                denoised_2 = self.p_mean_variance(denoise_fn, x_2 * c_in_2, t_2, condition)["pred_x_start"]
                 d_2 = self.to_d(x_2, self.sigmas[i+1], denoised_2)
                 d_prime = (d + d_2) / 2
                 x = x + d_prime * dt
         yield x, denoised
     
-    def sample_dpm(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size):
+    def sample_dpm(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size, condition = None):
         """
         A sampler inspired by DPM-Solver-2 and Algorithm 2 from Karras et al. (2022).
 
@@ -169,7 +169,7 @@ class KarrasSampler(DiffusionBase):
             
             t = torch.full((batch_size,), self.karras_t_sigmas_hat[i], device=self.device, dtype=torch.long)
             c_in = self.unsqueeze_as(1. / (sigma_hat ** 2 + 1) ** 0.5, x)
-            denoised = self.p_mean_variance(denoise_fn, x * c_in, t)["pred_x_start"]
+            denoised = self.p_mean_variance(denoise_fn, x * c_in, t, condition)["pred_x_start"]
             d = self.to_d(x, sigma_hat, denoised)
             yield x, denoised # "x": x, "pred_x_start": denoised
 
@@ -181,12 +181,12 @@ class KarrasSampler(DiffusionBase):
             x_2 = x + d * dt_1
             t_2 = torch.full((batch_size,), self.karras_t_sigmas_mid[i], device=self.device, dtype=torch.long)
             c_in_2 = self.unsqueeze_as(1. / (sigma_mid ** 2 + 1) ** 0.5, x)
-            denoised_2 = self.p_mean_variance(denoise_fn, x_2 * c_in_2, t_2)["pred_x_start"]
+            denoised_2 = self.p_mean_variance(denoise_fn, x_2 * c_in_2, t_2, condition)["pred_x_start"]
             d_2 = self.to_d(x_2, sigma_mid, denoised_2)
             x = x + d_2 * dt_2
         yield x, denoised # "x": x, "pred_x_start": denoised
     
-    def sample_euler_ancestral(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size):
+    def sample_euler_ancestral(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size, condition = None):
         """
         Ancestral sampling with Euler method steps.
 
@@ -201,7 +201,7 @@ class KarrasSampler(DiffusionBase):
         for i in indices:
             t = torch.full((batch_size,), self.karras_t_sigmas[i], device=self.device, dtype=torch.long)
             c_in = self.unsqueeze_as(1. / (self.sigmas[i] ** 2 + 1) ** 0.5, x)
-            denoised = self.p_mean_variance(denoise_fn, x * c_in, t)["pred_x_start"]
+            denoised = self.p_mean_variance(denoise_fn, x * c_in, t, condition)["pred_x_start"]
             yield x, denoised # "x": x, ..., "pred_x_start": denoised
 
             # Euler method
@@ -212,7 +212,7 @@ class KarrasSampler(DiffusionBase):
             x = x + torch.randn_like(x) * sigma_up
         yield x, x # "x": x, "pred_x_start": x
     
-    def forward(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size, num_samples: int = 1):
+    def forward(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], shape: Size, num_samples: int = 1, condition = None):
         sampler_fn = {
             "heun": self.sample_heun,
             "dpm": self.sample_dpm, 
@@ -223,7 +223,7 @@ class KarrasSampler(DiffusionBase):
         sample_indices = np.linspace(0, self.karras_num_timesteps, num_samples, dtype=np.int64).tolist()
         sample_list = []
         do_sampling = num_samples > 1
-        for i, (x_t, pred_x_start) in enumerate(sampler_fn(denoise_fn, shape)):
+        for i, (x_t, pred_x_start) in enumerate(sampler_fn(denoise_fn, shape, condition=condition)):
             if do_sampling and i in sample_indices:
                 sample_list.append(x_t)
         

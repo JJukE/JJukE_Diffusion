@@ -55,10 +55,10 @@ class DDPMTrainer(DiffusionBase):
         return loss
     
 
-    def get_vlb(self, denoise_fn, x_start, x_t, t):
+    def get_vlb(self, denoise_fn, x_start, x_t, t, condition = None):
         # variational lower bound
         true_mean, _, true_log_var = self.q_posterior_mean_variance(x_start, x_t, t)
-        out = self.p_mean_variance(denoise_fn, x_t, t)
+        out = self.p_mean_variance(denoise_fn, x_t, t, condition)
         model_mean, model_log_var = out["model_mean"], out["model_log_var"]
         kl = normal_kl(true_mean, true_log_var, model_mean, model_log_var)
         kl = reduce(kl, "B ... -> B", "mean")
@@ -71,40 +71,36 @@ class DDPMTrainer(DiffusionBase):
         return out
     
     
-    def forward(self, denoise_fn: Callable[[Tensor, Tensor], Tensor],
-                x_start: Tensor, t: Tensor = None, noise: Tensor = None, return_info=False):
+    def forward(self, denoise_fn: Callable[[Tensor, Tensor], Tensor], x_start: Tensor, t: Tensor = None,
+                noise: Tensor = None, return_info = False, condition = None):
         batch_size = x_start.shape[0]
         t = default(t, lambda: torch.randint(0, self.num_timesteps, (batch_size, ), dtype=torch.long, device=self.device))
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_t = self.q_sample(x_start, t, noise)
 
         losses = {}
-        info = {"t": t, "eps": noise, "x_t": x_t, "x_start": x_start}
-
         if self.loss_type in ("kl", "rescaled_kl"):
             # \mathcal{L}_\text{kl}
-            info.update(self.get_vlb(denoise_fn=denoise_fn, x_start=x_start, x_t=x_t, t=t))
-            losses["loss"] = info["vlb"]
+            losses["loss"] = self.get_vlb(denoise_fn=denoise_fn, x_start=x_start, x_t=x_t, t=t)
         
         elif self.loss_type in ("l2", "rescaled_l2", "l1", "rescaled_l1"):
             # \mathcal{L}_\text{vlb}
-            model_out = denoise_fn(x_t, t)
+            model_out = denoise_fn(x_t, t, condition)
             if self.model_var_type in ["learned", "learned_range"]:
                 assert model_out.shape[1] == 2 * x_t.shape[1], "Output channel must be double of input channel for {}".format(self.model_var_type)
                 model_out, tmp = torch.chunk(model_out, chunks=2, dim=1)
                 frozen_out = torch.cat([model_out.detach(), tmp], dim=1)
-                info.update(self.get_vlb(lambda *_: frozen_out, x_start, x_t, t)) # return the values of the variables regardless of its input
-                losses["vlb"] = info["vlb"]
+                losses["vlb"] = self.get_vlb(lambda *_: frozen_out, x_start, x_t, t) # return the values of the variables regardless of its input
                 if self.loss_type in ("rescaled_l1", "rescaled_l2"):
                     losses["vlb"] = losses["vlb"] * self.num_timesteps / 1000.
             # NOTE: vlb is not calculated when its fixed variance setting, but the fixed variances are used during sampling
 
             # \mathcal{L}_\text{simple}
-            x_prev = self.q_posterior_mean_variance(x_start, x_t, t)[0]
-            info["x_prev"] = x_prev
-            
-            target = {"eps": noise, "x_start": x_start, "x_prev": x_prev}[self.model_mean_type]
-            info["target"] = target
+            target = {
+                "eps": lambda: noise,
+                "x_start": lambda: x_start,
+                "x_prev": lambda: self.q_posterior_mean_variance(x_start, x_t, t)[0]
+            }[self.model_mean_type]()
             losses["recon"] = self.loss_fn(model_out, target)
 
             # \mathcal{L} = \mathcal{L}_\text{simple} * \lambda_\text{p2}
@@ -116,8 +112,7 @@ class DDPMTrainer(DiffusionBase):
             # \mathcal{L}_\text{hybrid}
             if "vlb" in losses:
                 losses["loss"] = losses["loss"] + losses["vlb"]
-            
-        return (losses, info) if return_info else losses
+        return losses
 
 
 class DDPMSampler(DiffusionBase):
