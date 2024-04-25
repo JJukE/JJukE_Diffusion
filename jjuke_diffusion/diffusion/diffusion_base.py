@@ -199,8 +199,8 @@ class DiffusionBase(PostInitModule):
         return mean, variance, log_variance
 
 
-    def p_mean_variance(self, denoise_fn: Callable, x_t: Tensor, t: Tensor, condition=None, condition_cross=None):
-        model_out: Tensor = denoise_fn(x_t, t, condition, condition_cross)
+    def p_mean_variance(self, denoise_fn: Callable, x_t: Tensor, t: Tensor, condition=None):
+        model_out: Tensor = denoise_fn(x_t, t, condition)
         out_dict = {"model_out": model_out}
 
         # get variance
