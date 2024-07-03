@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="jjuke-diffusion",
-    version="0.0.1.0",
+    version="0.0.1.1",
     description="Use diffusions for various models",
     author="JJukE",
     author_email="psj9156@gmail.com",
