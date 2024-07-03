@@ -199,8 +199,17 @@ class DiffusionBase(PostInitModule):
         return mean, variance, log_variance
 
 
-    def p_mean_variance(self, denoise_fn: Callable, x_t: Tensor, t: Tensor, condition=None):
-        model_out: Tensor = denoise_fn(x_t, t, condition)
+    def p_mean_variance(self, denoise_fn: Callable, x_t: Tensor, t: Tensor, c=None, y=None, c_shape=None, cfg_scale=0.):
+        model_out: Tensor = denoise_fn(x_t, t, c)
+        if not isinstance(model_out, torch.Tensor) and hasattr(model_out, "sample"):
+            model_out = model_out.sample
+        
+        if cfg_scale > 0:
+            uncond = torch.zeros(c_shape, device=c.device) # TODO: dummy value # torch.randn(cond_shape, device=self.device) ??
+            uncond_model_out = denoise_fn(x_t, t, uncond)
+            if not isinstance(uncond_model_out, torch.Tensor) and hasattr(uncond_model_out, "sample"):
+                uncond_model_out = uncond_model_out.sample
+            model_out = torch.lerp(model_out, uncond_model_out, cfg_scale)
         out_dict = {"model_out": model_out}
 
         # get variance
